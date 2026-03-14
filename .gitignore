@@ -14,7 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/ is used by ECHOCRAFT for shared libraries, do not ignore
+# lib/
 lib64/
 parts/
 sdist/

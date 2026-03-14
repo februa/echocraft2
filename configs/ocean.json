@@ -1,0 +1,13 @@
+{
+  "sound_speed_profile": [
+    {"depth": 0, "speed": 1500.0},
+    {"depth": 100, "speed": 1490.0}
+  ],
+  "bathymetry": {
+    "depth": 100.0,
+    "bottom_type": "sand"
+  },
+  "surface": {
+    "sea_state": 2
+  }
+}

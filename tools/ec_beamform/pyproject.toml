@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ec-beamform"
+version = "0.1.0"
+description = "Delay-and-sum beamformer for ECHOCRAFT"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["ec_beamform"]

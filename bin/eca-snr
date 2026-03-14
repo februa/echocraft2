@@ -1,0 +1,5 @@
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+export PYTHONPATH="${PROJECT_ROOT}/lib:${PROJECT_ROOT}/tools/eca_snr:${PYTHONPATH:-}"
+exec python -m eca_snr "$@"

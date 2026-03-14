@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ec-to-wav"
+version = "0.1.0"
+description = "Binary to WAV file converter for ECHOCRAFT"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["ec_to_wav"]
