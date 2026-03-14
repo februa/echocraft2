@@ -161,12 +161,25 @@ Layer2の分析結果もNDJSONで出力される。
 | `source` | 音源定義 | `freq`, `sl`, `az`, `el` | `source_id` は持たない |
 | `noise` | 雑音場定義 | `nl` | |
 | `transfer` | 伝搬応答（遅延・損失） | `source_id`, `sensor_id`, `delay`, `loss_db` | `source_id` は `ec-propagate` が出現順で採番 |
-| `spectrum` | 周波数スペクトル1点 | `freq`, `power_db` | |
-| `scalar` | 単一の分析値 | `key`, `value`, `unit` | |
+| `spectrum` | 周波数スペクトル1点 | `freq`, `power_db`, `time` | `time` は秒単位（`block_index / rate`） |
+| `bearing` | 方位レベル1点 | `azimuth`, `level_db`, `time` | `time` は秒単位（`block_index / rate`） |
+| `scalar` | 単一の分析値 | `key`, `value`, `unit`, `time` | `time` は秒単位（`block_index / rate`） |
 
 `source` レコードは識別子を持たない。下流の `ec-propagate` が `source` レコードの出現順に
 `source_id` を採番し、`transfer` レコードに付与する。これにより複数の音源定義ツール
 （`ec-source-nb` 等）の出力を結合しても、識別子の衝突が起きない。
+
+#### time フィールド
+
+Layer2の分析ツール（`eca-spectrum`, `eca-bearing-level` 等）が出力するレコードには
+`time` フィールド（秒単位）を付与する。値は `block_index / rate` で算出する。
+これにより ecv-* の時間軸プロット（BTR, LOFAR等）が時間情報を直接参照できる。
+
+#### 線形振幅の扱い
+
+`spectrum` レコードは `power_db`（dB）のみを保持する。
+線形振幅（uPa）が必要な場合は、可視化ツール（ecv-*）側で `10^(power_db/20)` と逆変換する。
+dBはパイプライン内の正規表現であり、線形振幅は表示上の都合として可視化ツールの責務とする。
 
 #### NDJSONサンプル
 
@@ -174,10 +187,12 @@ Layer2の分析結果もNDJSONで出力される。
 {"type": "source", "freq": 100, "sl": 0, "az": 0, "el": 0}
 {"type": "source", "freq": 2000, "sl": -10, "az": -30, "el": 0}
 {"type": "noise", "nl": -20}
-{"type": "spectrum", "freq": 0.0, "power_db": -10.2}
-{"type": "spectrum", "freq": 1.0, "power_db": -8.1}
-{"type": "scalar", "key": "peak_freq", "value": 440.2, "unit": "Hz"}
-{"type": "scalar", "key": "snr", "value": 12.3, "unit": "dB"}
+{"type": "spectrum", "freq": 0.0, "power_db": -10.2, "time": 0.5}
+{"type": "spectrum", "freq": 256.0, "power_db": -8.1, "time": 0.5}
+{"type": "bearing", "azimuth": 0.0, "level_db": -12.3, "time": 0.5}
+{"type": "bearing", "azimuth": 1.0, "level_db": -15.7, "time": 0.5}
+{"type": "scalar", "key": "peak_freq", "value": 440.2, "unit": "Hz", "time": 0.5}
+{"type": "scalar", "key": "snr", "value": 12.3, "unit": "dB", "time": 0.5}
 ```
 
 ---
@@ -248,11 +263,15 @@ Layer2の分析結果もNDJSONで出力される。
 
 **空間系**
 
-| ツール | 責務 |
-|--------|------|
-| `eca-beam-pattern` | ビームパターン生成 |
-| `eca-beamwidth` | メインローブ半減半角（-3dB幅） |
-| `eca-sidelobe-level` | サイドローブレベル（dB） |
+| ツール | 入力 | 出力 | 責務 |
+|--------|------|------|------|
+| `eca-bearing-level` | バイナリストリーム + array.json + stream.json | NDJSON (bearing) | 全方位ビーム掃引 → 方位×レベル算出 |
+| `eca-beam-pattern` | — | — | ビームパターン生成 |
+| `eca-beamwidth` | — | — | メインローブ半減半角（-3dB幅） |
+| `eca-sidelobe-level` | — | — | サイドローブレベル（dB） |
+
+`eca-bearing-level` はバイナリストリームを読み、ブロックごとに指定方位範囲を掃引して
+`bearing` レコードを出力する。`eca-spectrum` と同様にバイナリ→NDJSONの変換を担う分析ツール。
 
 ### 可視化: `ecv-`（ファイルベース可視化）
 
@@ -264,21 +283,28 @@ ecv-* はパイプラインに参加せず、保存済みファイルを入力�
 - 入力はファイル（`--input`）。ツールごとに適切なファイル形式（NDJSON・WAV・JSON）を読む
 - 出力は画像ファイル（`--output`）。形式は PNG/SVG 等
 - パイプラインとは独立しているため、同じデータに対して複数の可視化を並行実行できる
+- 線形振幅など表示スケールの変換は ecv-* の責務とする
 
-**スペクトル・時系列系**
+| ツール | 入力 | 主要オプション | 責務 |
+|--------|------|--------------|------|
+| `ecv-spectrum` | NDJSON (spectrum) | `--scale linear\|log` | 周波数スペクトル表示（Linear/Log切替） |
+| `ecv-bl` | NDJSON (bearing) | — | BL表示（方位×レベル） |
+| `ecv-polar` | NDJSON (bearing) | — | 極座標表示（方位×レベル） |
+| `ecv-btr` | NDJSON (bearing) | — | BTR表示（方位×時間×レベル、colormap: jet） |
+| `ecv-lofar` | NDJSON (spectrum) | — | LOFAR表示（周波数×時間×レベル、colormap: jet） |
 
-| ツール | 入力 | 出力 | 責務 |
-|--------|------|------|------|
-| `ecv-spectrum` | NDJSON（spectrum レコード） | PNG/SVG | スペクトルプロット |
-| `ecv-waveform` | WAV | PNG/SVG | 波形プロット |
-| `ecv-timeseries` | NDJSON（scalar レコード） | PNG/SVG | 時系列プロット |
+**軸定義**
 
-**空間系**
+| ツール | x軸 | y軸 | z軸（色） |
+|--------|-----|-----|----------|
+| `ecv-spectrum` (linear) | Frequency [Hz] (0–fs/2) | Amplitude [uPa] | — |
+| `ecv-spectrum` (log) | Frequency [Hz] (0–fs/2) | Level [dB] | — |
+| `ecv-bl` | Azimuth [deg] (0–180) | Level [dB/uPa] | — |
+| `ecv-polar` | Azimuth [deg] (0–360, polar) | Level [dB/uPa] (radial) | — |
+| `ecv-btr` | Azimuth [deg] (0–360) | Time [s] (0–T, inverted) | Level [dB/uPa] (jet) |
+| `ecv-lofar` | Frequency [Hz] (0–fs/2) | Time [s] (0–T, inverted) | Level [dB/uPa] (jet) |
 
-| ツール | 入力 | 出力 | 責務 |
-|--------|------|------|------|
-| `ecv-beam-pattern` | array.json + パラメータ | PNG/SVG | ビームパターン極座標プロット |
-| `ecv-array` | array.json | PNG/SVG | アレイ配置図 |
+BTR・LOFARのy軸（時間）は逆方向（上が古い、下が新しい）とする。
 
 ---
 
@@ -362,13 +388,7 @@ ec-read signal.wav --array array.json --stream stream.json \
 
 ```bash
 # 1. 処理パイプラインでファイルを保存
-ec-source-nb --freq 100,2000 --sl 0,-10 --az 0,-30 --el 0,0 \
-  | ec-noise --nl -20 \
-  | ec-propagate --env ocean.json --model plane-wave \
-  | ec-array --array array.json \
-  | ec-sample --stream stream.json --duration 10 \
-  | ec-to-wav --stream stream.json --output signal.wav --channels 10
-
+# スペクトル分析結果
 ec-source-nb --freq 100,2000 --sl 0,-10 --az 0,-30 --el 0,0 \
   | ec-noise --nl -20 \
   | ec-propagate --env ocean.json --model plane-wave \
@@ -378,11 +398,22 @@ ec-source-nb --freq 100,2000 --sl 0,-10 --az 0,-30 --el 0,0 \
   | eca-spectrum --stream stream.json \
   > spectrum.ndjson
 
+# 方位レベル分析結果
+ec-source-nb --freq 100,2000 --sl 0,-10 --az 0,-30 --el 0,0 \
+  | ec-noise --nl -20 \
+  | ec-propagate --env ocean.json --model plane-wave \
+  | ec-array --array array.json \
+  | ec-sample --stream stream.json --duration 10 \
+  | eca-bearing-level --array array.json --stream stream.json \
+  > bearing.ndjson
+
 # 2. 保存済みファイルから可視化（複数並行実行可能）
-ecv-waveform --input signal.wav --output waveform.png
-ecv-spectrum --input spectrum.ndjson --output spectrum.png
-ecv-beam-pattern --array array.json --stream stream.json --steer-az 0 --output beam.png
-ecv-array --input array.json --output array_layout.png
+ecv-spectrum --input spectrum.ndjson --scale log --output spectrum_log.png
+ecv-spectrum --input spectrum.ndjson --scale linear --output spectrum_linear.png
+ecv-lofar --input spectrum.ndjson --output lofar.png
+ecv-bl --input bearing.ndjson --output bl.png
+ecv-polar --input bearing.ndjson --output polar.png
+ecv-btr --input bearing.ndjson --output btr.png
 ```
 
 ### jqとの連携例（NDJSONフェーズ）

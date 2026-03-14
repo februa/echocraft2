@@ -72,7 +72,9 @@ def main() -> None:
         block = block.reshape(1, block_size)
         
         # Analyze
-        records = analyzer.analyze_block(block)
+        records = analyzer.analyze_block(
+            block, block_index=block_count, rate=stream_config.rate
+        )
         
         # Write spectrum records
         for record in records:

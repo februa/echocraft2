@@ -1,0 +1,3 @@
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="${SCRIPT_DIR}/lib:${SCRIPT_DIR}/tools/ecv_bl" exec python3 -m ecv_bl "$@"

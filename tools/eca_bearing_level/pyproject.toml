@@ -1,0 +1,6 @@
+[project]
+name = "eca-bearing-level"
+version = "0.1.0"
+description = "Bearing level analysis via beam sweeping"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
