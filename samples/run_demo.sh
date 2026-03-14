@@ -12,12 +12,14 @@
 #     spectrum.ndjson    - Spectrum analysis result
 #     bearing.ndjson     - Bearing level analysis result
 #     signal.wav         - Multi-channel WAV
+#     sources.ndjson     - Source/noise parameter records
 #     spectrum_log.png   - Spectrum plot (dB)
 #     spectrum_linear.png - Spectrum plot (linear amplitude)
 #     bl.png             - Bearing level plot
 #     polar.png          - Polar bearing level plot
 #     btr.png            - Bearing-Time Record
 #     lofar.png          - LOFAR display
+#     scene.png          - Scene overview (array + signal directions)
 
 set -euo pipefail
 
@@ -40,9 +42,9 @@ OCEAN="${ROOT_DIR}/configs/ocean.json"
 # Signal parameters
 #   Source 1: 1024 Hz, 0 dB, azimuth 0 deg  (broadside)
 #   Source 2: 4096 Hz, -5 dB, azimuth 30 deg (off-axis)
-FREQ="1024,4096"
+FREQ="10240,5120"
 SL="0,-5"
-AZ="0,30"
+AZ="90,150"
 EL="0,0"
 NL="-40"
 DURATION="1.0"
@@ -50,15 +52,22 @@ DURATION="1.0"
 # Bearing sweep parameters
 AZ_START="0"
 AZ_END="180"
-AZ_STEP="2"
+AZ_STEP="1"
 
 mkdir -p "${OUTPUT_DIR}"
 echo "=== ECHOCRAFT Demo ==="
 echo "Output directory: ${OUTPUT_DIR}"
 echo ""
 
+# --- 0. Save source/noise parameters for scene plot ---
+echo "[0/6] Saving source parameters..."
+python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
+  | python3 -m ec_noise --nl ${NL} \
+  > "${OUTPUT_DIR}/sources.ndjson"
+echo "  -> sources.ndjson ($(wc -l < "${OUTPUT_DIR}/sources.ndjson") records)"
+
 # --- 1. Spectrum analysis pipeline ---
-echo "[1/5] Running spectrum analysis pipeline..."
+echo "[1/6] Running spectrum analysis pipeline..."
 python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_noise --nl ${NL} \
   | python3 -m ec_propagate --env "${OCEAN}" --model plane-wave \
@@ -70,7 +79,7 @@ python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
 echo "  -> spectrum.ndjson ($(wc -l < "${OUTPUT_DIR}/spectrum.ndjson") records)"
 
 # --- 2. Bearing level analysis pipeline ---
-echo "[2/5] Running bearing level analysis pipeline..."
+echo "[2/6] Running bearing level analysis pipeline..."
 python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_noise --nl ${NL} \
   | python3 -m ec_propagate --env "${OCEAN}" --model plane-wave \
@@ -82,7 +91,7 @@ python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
 echo "  -> bearing.ndjson ($(wc -l < "${OUTPUT_DIR}/bearing.ndjson") records)"
 
 # --- 3. WAV export ---
-echo "[3/5] Exporting WAV file..."
+echo "[3/6] Exporting WAV file..."
 python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_noise --nl ${NL} \
   | python3 -m ec_propagate --env "${OCEAN}" --model plane-wave \
@@ -92,7 +101,7 @@ python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
 echo "  -> signal.wav ($(stat -c%s "${OUTPUT_DIR}/signal.wav" 2>/dev/null || stat -f%z "${OUTPUT_DIR}/signal.wav") bytes)"
 
 # --- 4. Visualization ---
-echo "[4/5] Generating plots..."
+echo "[4/6] Generating plots..."
 
 python3 -m ecv_spectrum \
   --input "${OUTPUT_DIR}/spectrum.ndjson" \
@@ -126,7 +135,15 @@ python3 -m ecv_lofar \
   --output "${OUTPUT_DIR}/lofar.png"
 echo "  -> lofar.png"
 
-# --- 5. Summary ---
+# --- 5. Scene overview ---
+echo "[5/6] Generating scene overview..."
+python3 -m ecv_scene \
+  --array "${ARRAY}" \
+  --input "${OUTPUT_DIR}/sources.ndjson" \
+  --output "${OUTPUT_DIR}/scene.png"
+echo "  -> scene.png"
+
+# --- 6. Summary ---
 echo ""
-echo "[5/5] Done. Output files:"
+echo "[6/6] Done. Output files:"
 ls -lh "${OUTPUT_DIR}/"

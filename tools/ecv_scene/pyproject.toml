@@ -1,0 +1,12 @@
+[project]
+name = "ecv-scene"
+version = "0.1.0"
+description = "Scene overview plotter for ECHOCRAFT"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "matplotlib",
+]
+
+[project.scripts]
+ecv-scene = "ecv_scene.main:main"
