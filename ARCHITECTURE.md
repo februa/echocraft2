@@ -25,7 +25,7 @@ ECHOCRAFTはGUIを持たず、標準入出力とファイルI/Oのみでツー�
 
 ## レイヤー構造
 
-ECHOCRAFTのツール群は**2つのレイヤー**に分類される。
+ECHOCRAFTのツール群は**2つのレイヤーと1つの可視化カテゴリ**に分類される。
 
 ```
 Layer1: 信号生成・処理層  (prefix: ec-)
@@ -35,7 +35,15 @@ Layer1: 信号生成・処理層  (prefix: ec-)
 Layer2: 分析層           (prefix: eca-)
   生成・取得した信号に対する分析を担う
   stdin/stdout でNDJSONまたはバイナリストリームを扱う
+
+可視化: ファイルベース可視化  (prefix: ecv-)
+  保存済みファイル（NDJSON・WAV・JSON）を読み、画像を生成する
+  パイプラインには参加しない独立したツール群
 ```
+
+Layer1・Layer2はパイプで合成可能（出力が次のツールの入力になる）。
+ecv-* はパイプラインの終端ではなく、**保存済みファイルから独立して動作する**。
+これにより同じデータに対して複数の可視化を並行して生成できる。
 
 ### Layer1のパイプラインフェーズ
 
@@ -215,7 +223,8 @@ Layer2の分析結果もNDJSONで出力される。
 
 | ツール | 入力 | 出力 | 責務 |
 |--------|------|------|------|
-| `ec-beamform` | バイナリストリーム + array.json + stream.json | バイナリストリーム | ビームフォーミング |
+| `ec-beamform` | バイナリストリーム + array.json + stream.json | バイナリストリーム | 遅延和ビームフォーミング（DAS） |
+| `ec-beamform-abf` | バイナリストリーム + array.json + stream.json | バイナリストリーム | 適応ビームフォーミング（ABF） |
 
 #### I/O変換
 
@@ -245,6 +254,32 @@ Layer2の分析結果もNDJSONで出力される。
 | `eca-beamwidth` | メインローブ半減半角（-3dB幅） |
 | `eca-sidelobe-level` | サイドローブレベル（dB） |
 
+### 可視化: `ecv-`（ファイルベース可視化）
+
+ecv-* はパイプラインに参加せず、保存済みファイルを入力として画像を生成する。
+パイプラインの処理結果を保存してから、独立して実行する。
+
+**設計方針**
+
+- 入力はファイル（`--input`）。ツールごとに適切なファイル形式（NDJSON・WAV・JSON）を読む
+- 出力は画像ファイル（`--output`）。形式は PNG/SVG 等
+- パイプラインとは独立しているため、同じデータに対して複数の可視化を並行実行できる
+
+**スペクトル・時系列系**
+
+| ツール | 入力 | 出力 | 責務 |
+|--------|------|------|------|
+| `ecv-spectrum` | NDJSON（spectrum レコード） | PNG/SVG | スペクトルプロット |
+| `ecv-waveform` | WAV | PNG/SVG | 波形プロット |
+| `ecv-timeseries` | NDJSON（scalar レコード） | PNG/SVG | 時系列プロット |
+
+**空間系**
+
+| ツール | 入力 | 出力 | 責務 |
+|--------|------|------|------|
+| `ecv-beam-pattern` | array.json + パラメータ | PNG/SVG | ビームパターン極座標プロット |
+| `ecv-array` | array.json | PNG/SVG | アレイ配置図 |
+
 ---
 
 ## パイプライン例
@@ -262,6 +297,23 @@ ec-source-nb --freq 100,2000,3000 --sl 0,-10,-5 --az 0,-30,90 --el 0,0,0 \
   | ec-beamform --array array.json --stream stream.json \
   | eca-spectrum --stream stream.json \
   | eca-integrate --method ema --alpha 0.1 \
+  | eca-peak-freq \
+  | eca-snr \
+  > result.ndjson
+```
+
+### 適応ビームフォーミング（ABF）への差し替え
+
+ビームフォーマを差し替えるだけでパイプラインの他の部分は変更不要。
+
+```bash
+ec-source-nb --freq 100,2000,3000 --sl 0,-10,-5 --az 0,-30,90 --el 0,0,0 \
+  | ec-noise --nl -20 \
+  | ec-propagate --env ocean.json --model plane-wave \
+  | ec-array --array array.json \
+  | ec-sample --stream stream.json --duration 10 \
+  | ec-beamform-abf --array array.json --stream stream.json --method mvdr --reg 1e-3 \
+  | eca-spectrum --stream stream.json \
   | eca-peak-freq \
   | eca-snr \
   > result.ndjson
@@ -304,6 +356,35 @@ ec-read signal.wav --array array.json --stream stream.json \
   > result.ndjson
 ```
 
+### 処理結果の可視化
+
+パイプラインで保存したファイルに対して、ecv-* を独立実行する。
+
+```bash
+# 1. 処理パイプラインでファイルを保存
+ec-source-nb --freq 100,2000 --sl 0,-10 --az 0,-30 --el 0,0 \
+  | ec-noise --nl -20 \
+  | ec-propagate --env ocean.json --model plane-wave \
+  | ec-array --array array.json \
+  | ec-sample --stream stream.json --duration 10 \
+  | ec-to-wav --stream stream.json --output signal.wav --channels 10
+
+ec-source-nb --freq 100,2000 --sl 0,-10 --az 0,-30 --el 0,0 \
+  | ec-noise --nl -20 \
+  | ec-propagate --env ocean.json --model plane-wave \
+  | ec-array --array array.json \
+  | ec-sample --stream stream.json --duration 10 \
+  | ec-beamform --array array.json --stream stream.json \
+  | eca-spectrum --stream stream.json \
+  > spectrum.ndjson
+
+# 2. 保存済みファイルから可視化（複数並行実行可能）
+ecv-waveform --input signal.wav --output waveform.png
+ecv-spectrum --input spectrum.ndjson --output spectrum.png
+ecv-beam-pattern --array array.json --stream stream.json --steer-az 0 --output beam.png
+ecv-array --input array.json --output array_layout.png
+```
+
 ### jqとの連携例（NDJSONフェーズ）
 
 ```bash
@@ -331,6 +412,59 @@ ec-source-nb --freq 100,2000,3000 --sl 0,-10,-5 --az 0,-30,90 --el 0,0,0 \
 - `ec-propagate` 内部：モデル実装を追加
 - `ocean.json`：モデル固有パラメータを追記
 - **他のツール：変更不要**
+
+---
+
+## ツール分離 vs オプション切り替えの判断基準
+
+同じカテゴリの機能を追加する際、既存ツールにオプション（`--method` 等）を追加するか、
+別ツールとして切り出すかの判断基準を以下に定める。
+
+### オプション切り替えが適切な場合（例: `ec-propagate --model`）
+
+- I/Oインターフェースが同一である
+- CLIパラメータが共通している（モデル固有の引数が少ない）
+- 内部状態の持ち方が同じである（ステートレス同士、ステートフル同士）
+- ツール名の責務（何をするか）が同一で、手段（どうやるか）だけが異なる
+
+`ec-propagate` はこの基準を満たす。伝搬モデル（平面波・レイトレーシング等）は
+手段の違いであり、「伝搬損失を適用する」という責務は共通している。
+
+### 別ツールとして切り出すべき場合（例: `ec-beamform` vs `ec-beamform-abf`）
+
+以下のいずれかに該当する場合、別ツールにする。
+
+1. **内部状態モデルが本質的に異なる**
+   - DAS（遅延和）はブロック間に状態を持たない（ステートレス）
+   - ABF（適応ビームフォーミング）は共分散行列の推定が必要で、ブロック間で状態を蓄積する（ステートフル）
+   - この差は実装の詳細ではなく、ツールの振る舞いの本質的な違いである
+
+2. **CLIパラメータが大幅に異なる**
+   - ABFには正則化パラメータ、スナップショット数、アルゴリズム種別（MVDR/MPDR等）など、DASにはない引数が必要になる
+   - 1つのツールに詰め込むと、片方のモード使用時に不要な引数が露出するか、引数の組み合わせ検証が複雑化する
+
+3. **ツールの肥大化を招く**
+   - 音源定義（`ec-source-nb` / `ec-source-bb`）と同じ判断基準
+   - 信号モデルやアルゴリズムモデルが異なれば別ツールとする
+
+### I/O契約の同一性は分離の障害にならない
+
+`ec-beamform` と `ec-beamform-abf` はI/O契約が同一である
+（マルチチャネルバイナリ入力 → 単チャネルバイナリ出力）。
+パイプライン上で差し替えるだけで切り替えられる。
+
+```bash
+# DAS
+... | ec-beamform --array array.json --stream stream.json | ...
+
+# ABF（差し替えるだけ）
+... | ec-beamform-abf --array array.json --stream stream.json --method mvdr --reg 1e-3 | ...
+```
+
+### 共通処理の共有
+
+ツールを分離しても、共通処理（ステアリング遅延の計算等）は
+`lib/common/` に切り出して共有する。ツールの分離はコードの重複を意味しない。
 
 ---
 
