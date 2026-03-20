@@ -100,7 +100,7 @@ python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_propagate --env "${OCEAN}" --model plane-wave \
   | python3 -m ec_array --array "${ARRAY}" \
   | python3 -m ec_sample --stream "${STREAM}" --duration ${DURATION} \
-  | python3 -m ec_to_wav --stream "${STREAM}" --output "${OUTPUT_DIR}/signal.wav" --channels 12
+  | python3 -m ec_to_wav --stream "${STREAM}" --array "${ARRAY}" --output "${OUTPUT_DIR}/signal.wav"
 echo "  -> signal.wav ($(stat -c%s "${OUTPUT_DIR}/signal.wav" 2>/dev/null || stat -f%z "${OUTPUT_DIR}/signal.wav") bytes)"
 
 # --- 4. Visualization ---
