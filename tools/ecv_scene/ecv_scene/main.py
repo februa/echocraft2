@@ -38,6 +38,13 @@ def parse_args() -> argparse.Namespace:
         help="Output image path (PNG or SVG)",
     )
     parser.add_argument(
+        "--heading",
+        type=float,
+        default=0.0,
+        help="Vessel heading in degrees (true north=0, clockwise). "
+        "Default 0 means bow points north.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logging output",
@@ -63,6 +70,7 @@ def main() -> None:
         array_path=args.array,
         input_path=args.input,
         output_path=args.output,
+        heading_deg=args.heading,
     )
 
 

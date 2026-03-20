@@ -42,13 +42,17 @@ class BearingLevelAnalyzer:
                      f"({az_start} to {az_end} step {az_step})")
 
     def _compute_delays(self, az_deg: float, el_deg: float) -> dict[int, float]:
-        """Compute steering delays for a given direction."""
+        """Compute steering delays for a given direction.
+
+        VESSEL_BODY coordinate: x=bow, y=starboard, z=up.
+        Azimuth: 0 = bow (+x), 90 = starboard (+y).
+        """
         az_rad = np.radians(az_deg)
         el_rad = np.radians(el_deg)
-        
+
         direction = np.array([
-            np.sin(az_rad) * np.cos(el_rad),
             np.cos(az_rad) * np.cos(el_rad),
+            np.sin(az_rad) * np.cos(el_rad),
             np.sin(el_rad),
         ])
         

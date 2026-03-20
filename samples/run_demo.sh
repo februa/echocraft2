@@ -39,12 +39,12 @@ STREAM="${ROOT_DIR}/configs/stream.json"
 ARRAY="${ROOT_DIR}/configs/array.json"
 OCEAN="${ROOT_DIR}/configs/ocean.json"
 
-# Signal parameters
-#   Source 1: 1024 Hz, 0 dB, azimuth 0 deg  (broadside)
-#   Source 2: 4096 Hz, -5 dB, azimuth 30 deg (off-axis)
+# Signal parameters (VESSEL_BODY: az=0 is bow, az=90 is starboard)
+#   Source 1: 10240 Hz, 0 dB, azimuth 60 deg
+#   Source 2: 5120 Hz, -5 dB, azimuth 150 deg
 FREQ="10240,5120"
 SL="0,-5"
-AZ="90,150"
+AZ="60,150"
 EL="0,0"
 NL="-40"
 DURATION="1.0"
@@ -53,6 +53,9 @@ DURATION="1.0"
 AZ_START="0"
 AZ_END="180"
 AZ_STEP="1"
+
+# Vessel heading (true north = 0, clockwise)
+HEADING="0"
 
 mkdir -p "${OUTPUT_DIR}"
 echo "=== ECHOCRAFT Demo ==="
@@ -140,7 +143,8 @@ echo "[5/6] Generating scene overview..."
 python3 -m ecv_scene \
   --array "${ARRAY}" \
   --input "${OUTPUT_DIR}/sources.ndjson" \
-  --output "${OUTPUT_DIR}/scene.png"
+  --output "${OUTPUT_DIR}/scene.png" \
+  --heading ${HEADING}
 echo "  -> scene.png"
 
 # --- 6. Summary ---

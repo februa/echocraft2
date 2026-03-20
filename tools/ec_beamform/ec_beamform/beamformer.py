@@ -64,12 +64,13 @@ class DelayAndSumBeamformer:
         az_rad = np.radians(self.steer_az)
         el_rad = np.radians(self.steer_el)
         
-        # Compute direction vector (plane wave direction)
-        # Elevation: 0 = horizontal, 90 = zenith
-        # Azimuth: 0 = north, 90 = east
+        # Compute direction vector (plane wave arrival direction)
+        # VESSEL_BODY coordinate: x=bow, y=starboard, z=up
+        # Azimuth: 0 = bow (+x), 90 = starboard (+y)
+        # Elevation: 0 = horizontal, 90 = zenith (+z)
         direction = np.array([
-            np.sin(az_rad) * np.cos(el_rad),
             np.cos(az_rad) * np.cos(el_rad),
+            np.sin(az_rad) * np.cos(el_rad),
             np.sin(el_rad),
         ])
         

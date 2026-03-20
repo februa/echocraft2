@@ -1,13 +1,18 @@
 """Tests for ScenePlotter."""
 
 import json
+import math
 import os
 import tempfile
 
 import pytest
 import numpy as np
 
-from ecv_scene.plotter import ScenePlotter
+from ecv_scene.plotter import (
+    ScenePlotter,
+    vessel_body_to_local_enu,
+    relative_to_true_bearing,
+)
 
 
 @pytest.fixture
@@ -113,3 +118,63 @@ class TestPlot:
         output = str(tmp_path / "scene.png")
         plotter.plot(array_path, sources_file, output)
         assert os.path.exists(output)
+
+    def test_with_heading(self, plotter, array_file, sources_file, tmp_path):
+        """Plot with non-zero heading generates output."""
+        output = str(tmp_path / "scene_headed.png")
+        plotter.plot(array_file, sources_file, output, heading_deg=45.0)
+        assert os.path.exists(output)
+        assert os.path.getsize(output) > 0
+
+
+class TestVesselBodyToLocalEnu:
+    """Tests for VESSEL_BODY → LOCAL_ENU coordinate conversion."""
+
+    def test_heading_zero_bow_is_north(self):
+        """Heading=0: bow (+x_body) points north (+y_enu)."""
+        x_body = np.array([1.0])
+        y_body = np.array([0.0])
+        east, north = vessel_body_to_local_enu(x_body, y_body, heading_deg=0.0)
+        assert east[0] == pytest.approx(0.0, abs=1e-10)
+        assert north[0] == pytest.approx(1.0, abs=1e-10)
+
+    def test_heading_zero_starboard_is_east(self):
+        """Heading=0: starboard (+y_body) points east (+x_enu)."""
+        x_body = np.array([0.0])
+        y_body = np.array([1.0])
+        east, north = vessel_body_to_local_enu(x_body, y_body, heading_deg=0.0)
+        assert east[0] == pytest.approx(1.0, abs=1e-10)
+        assert north[0] == pytest.approx(0.0, abs=1e-10)
+
+    def test_heading_90_bow_is_east(self):
+        """Heading=90: bow (+x_body) points east (+x_enu)."""
+        x_body = np.array([1.0])
+        y_body = np.array([0.0])
+        east, north = vessel_body_to_local_enu(x_body, y_body, heading_deg=90.0)
+        assert east[0] == pytest.approx(1.0, abs=1e-10)
+        assert north[0] == pytest.approx(0.0, abs=1e-10)
+
+    def test_heading_90_starboard_is_south(self):
+        """Heading=90: starboard (+y_body) points south (-y_enu)."""
+        x_body = np.array([0.0])
+        y_body = np.array([1.0])
+        east, north = vessel_body_to_local_enu(x_body, y_body, heading_deg=90.0)
+        assert east[0] == pytest.approx(0.0, abs=1e-10)
+        assert north[0] == pytest.approx(-1.0, abs=1e-10)
+
+
+class TestRelativeToTrueBearing:
+    """Tests for relative → true bearing conversion."""
+
+    def test_heading_zero_passthrough(self):
+        assert relative_to_true_bearing(90.0, 0.0) == pytest.approx(90.0)
+
+    def test_heading_offset(self):
+        assert relative_to_true_bearing(0.0, 45.0) == pytest.approx(45.0)
+
+    def test_wrap_around(self):
+        assert relative_to_true_bearing(350.0, 20.0) == pytest.approx(10.0)
+
+    def test_negative_relative(self):
+        result = relative_to_true_bearing(-30.0, 90.0)
+        assert result == pytest.approx(60.0)

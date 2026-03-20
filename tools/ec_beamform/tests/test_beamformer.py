@@ -110,10 +110,15 @@ class TestNormalization:
     """Tests for output normalization."""
 
     def test_normalization_output_amplitude_matches_input(self):
-        """Normalization: output amplitude ~ input amplitude (within tolerance)."""
+        """Normalization: output amplitude ~ input amplitude (within tolerance).
+
+        VESSEL_BODY: Az=0 = bow (+x). Sensors on y-axis are broadside to
+        the steering direction, so steering delay is 0 for both sensors,
+        keeping signals in phase.
+        """
         sensors = [
             {"id": 0, "x": 0.0, "y": 0.0, "z": 0.0},
-            {"id": 1, "x": 1.0, "y": 0.0, "z": 0.0},
+            {"id": 1, "x": 0.0, "y": 1.0, "z": 0.0},
         ]
         stream_config = StreamConfig(sample_rate=16000, rate=100)
         beamformer = DelayAndSumBeamformer(sensors, stream_config)
@@ -176,43 +181,49 @@ class TestSteeringDelayComputation:
     """Tests for steering delay computation."""
 
     def test_steering_delays_computed_correctly(self):
-        """Steering delays are computed correctly based on sensor positions."""
+        """Steering delays are computed correctly based on sensor positions.
+
+        VESSEL_BODY: Az=0 = bow (+x). Steering at Az=0 means direction
+        vector = (1, 0, 0). Sensor at x=1.0 has delay = -(1*1)/c.
+        """
         sensors = [
             {"id": 0, "x": 0.0, "y": 0.0, "z": 0.0},
-            {"id": 1, "x": 0.0, "y": 1.0, "z": 0.0},
+            {"id": 1, "x": 1.0, "y": 0.0, "z": 0.0},
         ]
         stream_config = StreamConfig(sample_rate=16000, rate=100)
-        
-        # Steer at az=0, el=0 (pointing along +y direction based on direction formula)
+
+        # Steer at az=0, el=0 → direction = (1, 0, 0) in VESSEL_BODY
         beamformer = DelayAndSumBeamformer(sensors, stream_config, steer_az=0.0, steer_el=0.0)
-        
+
         delays = beamformer.steering_delays
-        
+
         # Sensor 0 at origin should have delay 0
         assert delays[0] == pytest.approx(0.0, abs=1e-9)
-        
-        # Sensor 1 at y=1.0 with steering along y should have negative delay
-        # (plane wave arrives at sensor 1 first)
+
+        # Sensor 1 at x=1.0 with steering along +x: delay = -1.0 / c
         sound_speed = 1500.0
-        expected_delay_1 = -1.0 / sound_speed  # negative because arriving first
+        expected_delay_1 = -1.0 / sound_speed
         assert delays[1] == pytest.approx(expected_delay_1, rel=1e-6)
 
     def test_zero_steer_angles_reference_delays(self):
-        """With zero steer angles, delays match plane wave geometry."""
+        """With zero steer angles, delays match plane wave geometry.
+
+        VESSEL_BODY: Az=0, El=0 → direction = (1, 0, 0).
+        Dot product with sensor positions gives x coordinate.
+        Delays = -x / sound_speed.
+        """
         sensors = [
             {"id": 0, "x": 0.0, "y": 0.0, "z": 0.0},
-            {"id": 1, "x": 0.0, "y": 1.0, "z": 0.0},
+            {"id": 1, "x": 1.0, "y": 0.0, "z": 0.0},
             {"id": 2, "x": 0.0, "y": 0.0, "z": 1.0},
         ]
         stream_config = StreamConfig(sample_rate=16000, rate=100)
-        
+
         beamformer = DelayAndSumBeamformer(sensors, stream_config, steer_az=0.0, steer_el=0.0)
-        
+
         delays = beamformer.steering_delays
-        
-        # At az=0, el=0, direction is (0, 1, 0) after normalization
-        # So dot product with sensor positions gives y coordinate
-        # Delays should be -y / sound_speed
+
+        # direction = (1, 0, 0), delays = -x / c
         sound_speed = 1500.0
         assert delays[0] == pytest.approx(0.0, abs=1e-9)
         assert delays[1] == pytest.approx(-1.0 / sound_speed, rel=1e-6)
