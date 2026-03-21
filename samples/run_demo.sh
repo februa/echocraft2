@@ -113,6 +113,8 @@ echo "  -> sources.ndjson ($(wc -l < "${OUTPUT_DIR}/sources.ndjson") records)"
 #
 echo "[1/6] Running signal pipeline with fan-out (ec-pub/ec-sub)..."
 
+TOPIC_FILE="${TOPIC_DIR}/${TOPIC}.topic"
+
 # Publisher: upstream pipeline -> ec-pub
 python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_noise --nl ${NL} \
@@ -122,6 +124,20 @@ python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_pub --stream "${STREAM}" --array "${ARRAY}" \
       --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" --subscribers 3 &
 PID_PUB=$!
+
+# Wait for publisher to be ready (topic file appears)
+echo "  Waiting for publisher..."
+WAIT_COUNT=0
+while [ ! -f "${TOPIC_FILE}" ]; do
+    sleep 0.2
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    if [ ${WAIT_COUNT} -ge 150 ]; then
+        echo "  ERROR: Publisher did not start within 30 seconds" >&2
+        kill ${PID_PUB} 2>/dev/null
+        exit 1
+    fi
+done
+echo "  Publisher ready."
 
 # Subscriber 1: spectrum analysis
 python3 -m ec_sub --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" \
