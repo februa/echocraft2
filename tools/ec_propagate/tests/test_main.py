@@ -22,13 +22,13 @@ class TestParseArgs:
         assert args.model == "plane-wave"
         assert args.verbose is False
 
-    def test_parse_args_with_custom_model(self):
-        """Test parse_args with custom model."""
-        argv = ["--env", "/path/to/ocean.json", "--model", "spherical-wave"]
+    def test_parse_args_with_lossless_model(self):
+        """Test parse_args with lossless model."""
+        argv = ["--env", "/path/to/ocean.json", "--model", "lossless"]
         args = parse_args(argv)
-        
+
         assert args.env == "/path/to/ocean.json"
-        assert args.model == "spherical-wave"
+        assert args.model == "lossless"
 
     def test_parse_args_with_verbose_flag(self):
         """Test parse_args with verbose flag."""
@@ -37,11 +37,19 @@ class TestParseArgs:
         
         assert args.verbose is True
 
-    def test_parse_args_requires_env(self):
-        """Test that --env is required."""
+    def test_parse_args_defaults(self):
+        """Test that --env and --scenario default to None."""
         argv = []
-        with pytest.raises(SystemExit):
-            parse_args(argv)
+        args = parse_args(argv)
+        assert args.env is None
+        assert args.scenario is None
+
+    def test_parse_args_with_scenario(self):
+        """Test parse_args with --scenario flag."""
+        argv = ["--scenario", "/path/to/scenario.json"]
+        args = parse_args(argv)
+        assert args.scenario == "/path/to/scenario.json"
+        assert args.env is None
 
 
 class TestMain:
@@ -81,7 +89,7 @@ class TestMain:
         
         assert result == 1
         error_output = mock_stderr.getvalue()
-        assert "Error" in error_output or "not found" in error_output.lower()
+        assert "not found" in error_output.lower() or "File not found" in error_output
 
     def test_main_with_multiple_source_records(self):
         """Test main() with multiple source records."""
@@ -159,10 +167,10 @@ class TestMain:
             output = mock_stdout.getvalue()
             record = json.loads(output.strip())
             
-            # Expected: alpha = 0.001 * 100 = 0.1
-            # sl should be 150.0 - 0.1 = 149.9
-            expected_sl = 149.9
-            assert abs(record["sl"] - expected_sl) < 1e-9
+            # Thorp at 100 Hz (0.1 kHz): alpha ≈ 0.001 dB/km
+            # sl should be slightly less than 150.0
+            assert record["sl"] < 150.0
+            assert record["sl"] > 149.9  # Loss is very small at 100 Hz
 
     def test_main_with_empty_stdin(self):
         """Test main() with empty stdin."""
@@ -189,7 +197,7 @@ class TestMain:
             ocean_file.write_text('{"depth": 100.0}')
             
             input_data = '{"type": "source", "freq": 100.0, "sl": 150.0, "az": 45.0, "el": 10.0}\n'
-            argv = ["--env", str(ocean_file), "--model", "spherical-wave"]
+            argv = ["--env", str(ocean_file), "--model", "lossless"]
             
             with patch('sys.stdin', io.StringIO(input_data)):
                 with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
@@ -241,4 +249,69 @@ class TestMain:
             
             assert result == 1
             error_output = mock_stderr.getvalue()
-            assert "Error" in error_output
+            assert "Invalid JSON" in error_output
+
+    def test_main_with_scenario(self):
+        """Test main() resolves ocean path via --scenario."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ocean_file = Path(tmpdir) / "ocean.json"
+            ocean_file.write_text('{"depth": 100.0}')
+
+            scenario_file = Path(tmpdir) / "scenario.json"
+            scenario_file.write_text(json.dumps({"ocean": "ocean.json"}))
+
+            input_data = '{"type": "source", "freq": 100.0, "sl": 150.0, "az": 45.0, "el": 10.0}\n'
+            argv = ["--scenario", str(scenario_file)]
+
+            with patch('sys.stdin', io.StringIO(input_data)):
+                with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+                    result = main(argv)
+
+            assert result == 0
+            record = json.loads(mock_stdout.getvalue().strip())
+            assert record["type"] == "source"
+            assert "source_id" in record
+
+    def test_main_env_overrides_scenario(self):
+        """Test that --env takes precedence over --scenario ocean path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ocean_file = Path(tmpdir) / "ocean.json"
+            ocean_file.write_text('{"depth": 100.0}')
+
+            # Scenario points to nonexistent file
+            scenario_file = Path(tmpdir) / "scenario.json"
+            scenario_file.write_text(json.dumps({"ocean": "nonexistent.json"}))
+
+            input_data = '{"type": "source", "freq": 100.0, "sl": 150.0, "az": 45.0, "el": 10.0}\n'
+            argv = ["--scenario", str(scenario_file), "--env", str(ocean_file)]
+
+            with patch('sys.stdin', io.StringIO(input_data)):
+                with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
+                    result = main(argv)
+
+            assert result == 0
+
+    def test_main_returns_1_when_no_env_and_no_scenario(self):
+        """Test main() returns 1 when neither --env nor --scenario is given."""
+        input_data = '{"type": "source", "freq": 100.0, "sl": 150.0, "az": 45.0, "el": 10.0}\n'
+        argv = []
+
+        with patch('sys.stdin', io.StringIO(input_data)):
+            result = main(argv)
+
+        assert result == 1
+
+    def test_main_rejects_invalid_record(self):
+        """Test main() returns 1 on record missing required fields."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ocean_file = Path(tmpdir) / "ocean.json"
+            ocean_file.write_text('{"depth": 100.0}')
+
+            # source record missing 'az' and 'el'
+            input_data = '{"type": "source", "freq": 100.0, "sl": 150.0}\n'
+            argv = ["--env", str(ocean_file)]
+
+            with patch('sys.stdin', io.StringIO(input_data)):
+                result = main(argv)
+
+            assert result == 1

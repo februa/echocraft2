@@ -46,6 +46,8 @@ tool → tool          NG（ツール間の直接依存。パイプで連携す�
 ```
 
 `lib/common/` にはI/O契約の実装（NDJSONパーサ等）とユーティリティのみ置く。
+具体的には: `ndjson.py`（パーサ・ライタ）、`stream.py`（StreamConfig）、
+`record.py`（レコードバリデーション）、`scenario.py`（ScenarioConfig）、`log.py`（ログ設定）。
 ドメインロジックは各ツール内に閉じる。
 
 ### 4. クラスの分類

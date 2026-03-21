@@ -232,16 +232,90 @@ class TestSetupLogging:
     def test_critical_level_logged(self) -> None:
         """Test that CRITICAL level messages are logged."""
         setup_logging(verbose=False)
-        
+
         # Capture stderr
         captured_stderr = io.StringIO()
         root_logger = logging.getLogger()
         handler = root_logger.handlers[-1]
         handler.setStream(captured_stderr)
-        
+
         logger = logging.getLogger("test_module")
         logger.critical("Test critical message")
-        
+
         output = captured_stderr.getvalue()
         assert "CRITICAL:" in output
         assert "Test critical message" in output
+
+
+class TestSetupLoggingToolName:
+    """Tests for tool_name parameter in setup_logging."""
+
+    def teardown_method(self) -> None:
+        """Clean up logging state after each test."""
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+
+    def test_tool_name_prefix_in_output(self) -> None:
+        """Test that tool_name appears as prefix in log output."""
+        setup_logging(verbose=False, tool_name="ec-propagate")
+
+        captured_stderr = io.StringIO()
+        root_logger = logging.getLogger()
+        handler = root_logger.handlers[-1]
+        handler.setStream(captured_stderr)
+
+        logger = logging.getLogger("test_module")
+        logger.info("Processing records")
+
+        output = captured_stderr.getvalue()
+        assert output.startswith("ec-propagate:")
+        assert "INFO:" in output
+        assert "Processing records" in output
+
+    def test_no_tool_name_no_prefix(self) -> None:
+        """Test that omitting tool_name gives original format."""
+        setup_logging(verbose=False)
+
+        captured_stderr = io.StringIO()
+        root_logger = logging.getLogger()
+        handler = root_logger.handlers[-1]
+        handler.setStream(captured_stderr)
+
+        logger = logging.getLogger("test_module")
+        logger.info("Test message")
+
+        output = captured_stderr.getvalue()
+        assert output.startswith("INFO:")
+
+    def test_tool_name_none_no_prefix(self) -> None:
+        """Test that tool_name=None gives original format."""
+        setup_logging(verbose=False, tool_name=None)
+
+        captured_stderr = io.StringIO()
+        root_logger = logging.getLogger()
+        handler = root_logger.handlers[-1]
+        handler.setStream(captured_stderr)
+
+        logger = logging.getLogger("test_module")
+        logger.info("Test message")
+
+        output = captured_stderr.getvalue()
+        assert output.startswith("INFO:")
+
+    def test_tool_name_with_verbose(self) -> None:
+        """Test that tool_name works with verbose=True."""
+        setup_logging(verbose=True, tool_name="eca-spectrum")
+
+        captured_stderr = io.StringIO()
+        root_logger = logging.getLogger()
+        handler = root_logger.handlers[-1]
+        handler.setStream(captured_stderr)
+
+        logger = logging.getLogger("test_module")
+        logger.debug("Debug info")
+
+        output = captured_stderr.getvalue()
+        assert "eca-spectrum:" in output
+        assert "DEBUG:" in output
+        assert "Debug info" in output
