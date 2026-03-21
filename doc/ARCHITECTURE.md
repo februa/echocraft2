@@ -355,6 +355,35 @@ dBはパイプライン内の正規表現であり、線形振幅は表示上の
 | `ec-to-wav` | バイナリストリーム + stream.json | WAV | バイナリストリーム → WAV変換 |
 | `ec-write` | NDJSON | ファイル | 分析結果の保存 |
 
+#### I/Oルーティング
+
+バイナリストリームのファンアウト（1出力→N入力）を実現する。
+
+| ツール | 入力 | 出力 | 責務 |
+|--------|------|------|------|
+| `ec-pub` | バイナリストリーム + array.json + stream.json | TCP（トピック） | ストリームをトピックに発行 |
+| `ec-sub` | TCP（トピック） | バイナリストリーム | トピックからストリームを受信し stdout に書き出す |
+
+`ec-pub` は stdin からバイナリブロックを読み、localhost TCP 経由で接続された
+全サブスクライバにブロック単位でコピーを配信する。`ec-sub` は `ec-pub` が発行した
+トピックに接続し、受信したブロックを stdout に書き出す。
+`ec-sub` の stdout は通常のパイプラインに接続でき、シェルの合成可能性を維持する。
+
+トピックの発見にはファイルベースのトピックレジストリ（`/tmp/echocraft/{name}.topic`）を使用する。
+`ec-pub` がトピックファイルにポート番号を書き、`ec-sub` がそれを読んで接続する。
+
+```bash
+# ファンアウト例: 1つのストリームを3つの下流に分配
+ec-source-nb ... | ec-noise ... | ec-propagate ... | ec-array ... \
+  | ec-sample --stream stream.json --duration 1.0 \
+  | ec-pub --stream stream.json --array array.json --topic demo --subscribers 3 &
+
+ec-sub --topic demo | ec-beamform ... | eca-spectrum ... > spectrum.ndjson &
+ec-sub --topic demo | eca-bearing-level ... > bearing.ndjson &
+ec-sub --topic demo | ec-to-wav ... --output signal.wav &
+wait
+```
+
 ### Layer2: `eca-` （分析・パイプ）
 
 **スペクトル系**
