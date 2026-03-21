@@ -6,27 +6,53 @@ from common.stream import StreamConfig
 
 logger = logging.getLogger(__name__)
 
+WINDOW_FUNCTIONS = {
+    "rectangular": lambda n: np.ones(n),
+    "hanning": np.hanning,
+    "hamming": np.hamming,
+    "blackman": np.blackman,
+}
+
 
 class SpectrumAnalyzer:
     """Computes power spectrum from audio blocks.
-    
-    Performs FFT on audio data and computes power spectral density in dB.
-    Outputs positive frequencies only.
-    
+
+    Performs windowed FFT on audio data and computes power spectral density in dB.
+    Outputs positive frequencies only. Window function is applied before FFT to
+    reduce spectral leakage, with coherent gain correction applied to preserve
+    amplitude accuracy.
+
     Attributes:
         stream_config: StreamConfig instance with sample_rate and block_size.
+        window_name: Name of the window function.
+        window: Pre-computed window array.
+        coherent_gain: Mean of window values, used for amplitude correction.
     """
 
-    def __init__(self, stream_config: StreamConfig) -> None:
+    def __init__(self, stream_config: StreamConfig, window: str = "hanning") -> None:
         """Initialize SpectrumAnalyzer.
-        
+
         Args:
             stream_config: StreamConfig instance.
+            window: Window function name. One of "rectangular", "hanning",
+                "hamming", "blackman".
+
+        Raises:
+            ValueError: If window name is not recognized.
         """
+        if window not in WINDOW_FUNCTIONS:
+            raise ValueError(
+                f"Unknown window '{window}'. "
+                f"Available: {', '.join(WINDOW_FUNCTIONS.keys())}"
+            )
         self.stream_config = stream_config
+        self.window_name = window
+        self.window = WINDOW_FUNCTIONS[window](stream_config.block_size).astype(np.float64)
+        self.coherent_gain = np.mean(self.window)
         logger.debug(f"SpectrumAnalyzer initialized: "
                     f"sample_rate={stream_config.sample_rate}, "
-                    f"block_size={stream_config.block_size}")
+                    f"block_size={stream_config.block_size}, "
+                    f"window={window}, coherent_gain={self.coherent_gain:.4f}")
 
     def analyze_block(
         self, block: np.ndarray, block_index: int = 0, rate: int = 1
@@ -56,10 +82,13 @@ class SpectrumAnalyzer:
         
         # Use first channel only
         signal = block[0, :].astype(np.float64)
-        
+
+        # Apply window function and correct for coherent gain
+        windowed = signal * self.window / self.coherent_gain
+
         # Compute FFT
-        X = np.fft.rfft(signal)
-        
+        X = np.fft.rfft(windowed)
+
         # Compute power spectral density in dB
         # PSD = 10 * log10(|X|^2 / block_size)
         power = np.abs(X) ** 2 / block_size

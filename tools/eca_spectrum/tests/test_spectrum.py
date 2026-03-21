@@ -128,21 +128,25 @@ class TestSpectrumAnalyzerPowerCalculation:
     """Test power calculation in SpectrumAnalyzer."""
 
     def test_power_calculation_formula(self, analyzer, stream_config):
-        """Test that power is calculated correctly: 10*log10(power + 1e-20)."""
+        """Test that power is calculated correctly with window and coherent gain correction."""
         block_size = stream_config.block_size
         # Simple sinusoid
         amplitude = 1.0
         t = np.arange(block_size) / stream_config.sample_rate
         signal = amplitude * np.sin(2 * np.pi * 100 * t).astype(np.float32)
-        
+
         block = np.array([signal], dtype=np.float32)
         records = analyzer.analyze_block(block)
-        
-        # Manually calculate expected power at DC
-        X = np.fft.rfft(signal.astype(np.float64))
+
+        # Manually calculate expected power at DC with window + coherent gain
+        sig64 = signal.astype(np.float64)
+        window = np.hanning(block_size)
+        coherent_gain = np.mean(window)
+        windowed = sig64 * window / coherent_gain
+        X = np.fft.rfft(windowed)
         power = np.abs(X[0]) ** 2 / block_size
         expected_power_db = 10.0 * np.log10(power + 1e-20)
-        
+
         # DC component should match
         assert pytest.approx(records[0]["power_db"], abs=0.01) == expected_power_db
 
@@ -157,6 +161,68 @@ class TestSpectrumAnalyzerPowerCalculation:
         for record in records:
             assert np.isfinite(record["power_db"])
             assert record["power_db"] < -100
+
+
+class TestSpectrumAnalyzerWindow:
+    """Test window function support in SpectrumAnalyzer."""
+
+    def test_rectangular_window_no_modification(self, stream_config):
+        """Test that rectangular window produces same result as raw FFT."""
+        analyzer = SpectrumAnalyzer(stream_config, window="rectangular")
+        block_size = stream_config.block_size
+        t = np.arange(block_size) / stream_config.sample_rate
+        signal = np.sin(2 * np.pi * 100 * t).astype(np.float32)
+        block = np.array([signal], dtype=np.float32)
+
+        records = analyzer.analyze_block(block)
+
+        # Manual raw FFT (rectangular = no window, coherent_gain = 1.0)
+        X = np.fft.rfft(signal.astype(np.float64))
+        power = np.abs(X) ** 2 / block_size
+        expected_db = 10.0 * np.log10(power + 1e-20)
+
+        for i, record in enumerate(records):
+            assert pytest.approx(record["power_db"], abs=0.01) == expected_db[i]
+
+    def test_invalid_window_raises(self, stream_config):
+        """Test that invalid window name raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown window"):
+            SpectrumAnalyzer(stream_config, window="invalid_window")
+
+    def test_hanning_reduces_sidelobes(self, stream_config):
+        """Test that hanning window reduces spectral leakage vs rectangular."""
+        block_size = stream_config.block_size
+        t = np.arange(block_size) / stream_config.sample_rate
+        # Frequency NOT on an FFT bin to trigger spectral leakage
+        freq = 100.5 * stream_config.rate
+        signal = np.sin(2 * np.pi * freq * t).astype(np.float32)
+        block = np.array([signal], dtype=np.float32)
+
+        rect_analyzer = SpectrumAnalyzer(stream_config, window="rectangular")
+        hann_analyzer = SpectrumAnalyzer(stream_config, window="hanning")
+
+        rect_records = rect_analyzer.analyze_block(block)
+        hann_records = hann_analyzer.analyze_block(block)
+
+        # Find the peak bin index
+        rect_powers = [r["power_db"] for r in rect_records]
+        peak_idx = np.argmax(rect_powers)
+
+        # Compare far-from-peak sidelobe levels (e.g. 50 bins away)
+        far_idx = min(peak_idx + 50, len(rect_records) - 1)
+        assert hann_records[far_idx]["power_db"] < rect_records[far_idx]["power_db"]
+
+    def test_all_windows_produce_output(self, stream_config):
+        """Test that all supported windows produce valid output."""
+        block_size = stream_config.block_size
+        block = np.random.randn(1, block_size).astype(np.float32)
+
+        for window_name in ["rectangular", "hanning", "hamming", "blackman"]:
+            analyzer = SpectrumAnalyzer(stream_config, window=window_name)
+            records = analyzer.analyze_block(block)
+            assert len(records) == block_size // 2 + 1
+            for r in records:
+                assert np.isfinite(r["power_db"])
 
 
 class TestSpectrumAnalyzerFrequencies:

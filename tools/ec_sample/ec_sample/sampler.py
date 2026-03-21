@@ -75,10 +75,13 @@ class BlockSampler:
             freq = transfer["freq"]
             delay = transfer["delay"]
             loss_db = transfer["loss_db"]
-            
-            # Compute amplitude from loss in dB: amplitude = 10^(loss_db/20)
-            amplitude = 10.0 ** (loss_db / 20.0)
-            
+
+            # Compute peak amplitude from level in dB.
+            # Level is defined as 10*log10(mean_square), i.e. RMS-based.
+            # For sinusoid: mean(A*sin)^2 = A^2/2, so to get
+            # 10*log10(A^2/2) = loss_db, we need A = sqrt(2) * 10^(loss_db/20).
+            amplitude = np.sqrt(2.0) * 10.0 ** (loss_db / 20.0)
+
             # Generate sinusoid: sin(2*pi*f*(t - delay))
             signal = amplitude * np.sin(2.0 * np.pi * freq * (t - delay))
             

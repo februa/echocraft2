@@ -130,11 +130,11 @@ class TestSinusoidGeneration:
         assert peak_freq == pytest.approx(1000.0, abs=50)  # Allow 50 Hz tolerance
 
     def test_amplitude_scaling_from_db(self):
-        """Amplitude scaling from dB: 10^(sl/20)."""
+        """Peak amplitude = sqrt(2) * 10^(dB/20), so mean-square power matches dB."""
         sample_rate = 16000
         stream_config = StreamConfig(sample_rate=sample_rate, rate=100)
-        
-        # Test amplitude scaling: -20 dB should give 10^(-20/20) = 0.1
+
+        # Test: -20 dB → peak = sqrt(2) * 10^(-20/20) = sqrt(2) * 0.1 ≈ 0.1414
         transfers = [
             {
                 "source_id": 0,
@@ -144,16 +144,38 @@ class TestSinusoidGeneration:
                 "freq": 100.0,
             }
         ]
-        
+
         sampler = BlockSampler(transfers, None, stream_config, n_channels=1)
         block = sampler.generate_block(0)
-        
+
         signal = block[0, :]
-        expected_amplitude = 10.0 ** (-20.0 / 20.0)  # 0.1
-        
-        # Peak amplitude should be approximately expected_amplitude
+        expected_peak = np.sqrt(2.0) * 10.0 ** (-20.0 / 20.0)
+
         peak_amplitude = np.max(np.abs(signal))
-        assert peak_amplitude == pytest.approx(expected_amplitude, rel=0.05)
+        assert peak_amplitude == pytest.approx(expected_peak, rel=0.05)
+
+    def test_mean_square_power_matches_db_level(self):
+        """Verify 10*log10(mean(signal^2)) ≈ loss_db for a pure sinusoid."""
+        sample_rate = 16000
+        stream_config = StreamConfig(sample_rate=sample_rate, rate=1)  # large block
+
+        for level_db in [0.0, -10.0, -20.0, -40.0]:
+            transfers = [
+                {
+                    "source_id": 0,
+                    "sensor_id": 0,
+                    "delay": 0.0,
+                    "loss_db": level_db,
+                    "freq": 500.0,  # Exactly on FFT bin at fs=16000, block=16000
+                }
+            ]
+            sampler = BlockSampler(transfers, None, stream_config, n_channels=1)
+            block = sampler.generate_block(0)
+            signal = block[0, :]
+            measured_db = 10.0 * np.log10(np.mean(signal.astype(np.float64) ** 2) + 1e-30)
+            assert measured_db == pytest.approx(level_db, abs=0.1), (
+                f"level_db={level_db}: measured {measured_db}"
+            )
 
 
 class TestDelayHandling:

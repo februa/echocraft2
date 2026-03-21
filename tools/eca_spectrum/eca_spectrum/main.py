@@ -28,6 +28,13 @@ def parse_args() -> argparse.Namespace:
         help="Path to stream.json configuration file",
     )
     parser.add_argument(
+        "--window",
+        type=str,
+        default="hanning",
+        choices=["rectangular", "hanning", "hamming", "blackman"],
+        help="Window function for FFT (default: hanning)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logging output",
@@ -50,7 +57,7 @@ def main() -> None:
                 f"block_size={stream_config.block_size}")
     
     # Create analyzer
-    analyzer = SpectrumAnalyzer(stream_config)
+    analyzer = SpectrumAnalyzer(stream_config, window=args.window)
     
     # Create NDJSON writer
     writer = NdjsonWriter(sys.stdout)
