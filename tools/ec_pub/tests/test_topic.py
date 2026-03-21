@@ -47,47 +47,49 @@ class TestTopicName:
 
 
 class TestTopicFile:
-    """Tests for topic file write/read/remove."""
+    """Tests for topic file write/read/remove with explicit_dir."""
 
-    def test_write_and_read(self, tmp_path, monkeypatch):
-        # Override topic directory to tmp_path
-        monkeypatch.setattr("common.topic._TOPIC_DIR", tmp_path)
-
+    def test_write_and_read(self, tmp_path):
         info = TopicInfo(port=54321, pid=os.getpid())
-        path = write_topic("test-topic", info)
+        path = write_topic("test-topic", info, explicit_dir=str(tmp_path))
 
         assert path.exists()
         assert path.name == "test-topic.topic"
 
-        loaded = read_topic("test-topic")
+        loaded = read_topic("test-topic", explicit_dir=str(tmp_path))
         assert loaded == info
 
-    def test_remove(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("common.topic._TOPIC_DIR", tmp_path)
-
+    def test_remove(self, tmp_path):
         info = TopicInfo(port=11111, pid=os.getpid())
-        write_topic("removable", info)
+        write_topic("removable", info, explicit_dir=str(tmp_path))
 
-        remove_topic("removable")
-        assert not topic_path("removable").exists()
+        remove_topic("removable", explicit_dir=str(tmp_path))
+        assert not topic_path("removable", explicit_dir=str(tmp_path)).exists()
 
-    def test_remove_nonexistent(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("common.topic._TOPIC_DIR", tmp_path)
-        remove_topic("nonexistent")  # should not raise
+    def test_remove_nonexistent(self, tmp_path):
+        remove_topic("nonexistent", explicit_dir=str(tmp_path))  # should not raise
 
-    def test_read_nonexistent(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("common.topic._TOPIC_DIR", tmp_path)
+    def test_read_nonexistent(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            read_topic("nonexistent")
+            read_topic("nonexistent", explicit_dir=str(tmp_path))
 
-    def test_atomic_write_overwrites(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("common.topic._TOPIC_DIR", tmp_path)
+    def test_atomic_write_overwrites(self, tmp_path):
+        d = str(tmp_path)
+        write_topic("overwrite", TopicInfo(port=1, pid=1), explicit_dir=d)
+        write_topic("overwrite", TopicInfo(port=2, pid=2), explicit_dir=d)
 
-        write_topic("overwrite", TopicInfo(port=1, pid=1))
-        write_topic("overwrite", TopicInfo(port=2, pid=2))
-
-        loaded = read_topic("overwrite")
+        loaded = read_topic("overwrite", explicit_dir=d)
         assert loaded.port == 2
+
+    def test_env_var_fallback(self, tmp_path, monkeypatch):
+        """ECHOCRAFT_TOPIC_DIR env var is used when explicit_dir is None."""
+        monkeypatch.setenv("ECHOCRAFT_TOPIC_DIR", str(tmp_path))
+
+        info = TopicInfo(port=99999, pid=os.getpid())
+        write_topic("env-test", info)
+
+        loaded = read_topic("env-test")
+        assert loaded == info
 
 
 class TestProcessAlive:

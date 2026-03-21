@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 # Retry parameters for topic file discovery
 _POLL_INTERVAL = 0.1  # seconds between retries
-_MAX_POLL_ATTEMPTS = 300  # 30 seconds total
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -44,6 +43,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Topic name to subscribe to",
     )
     parser.add_argument(
+        "--topic-dir",
+        type=str,
+        default=None,
+        help="Directory for topic files (overrides ECHOCRAFT_TOPIC_DIR and default)",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=30.0,
@@ -57,7 +62,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _wait_for_topic(topic_name: str, timeout: float) -> int:
+def _wait_for_topic(
+    topic_name: str, timeout: float, topic_dir: str | None = None
+) -> int:
     """Wait for topic file to appear and return publisher port.
 
     Polls for the topic file until it appears or timeout is reached.
@@ -66,6 +73,7 @@ def _wait_for_topic(topic_name: str, timeout: float) -> int:
     Args:
         topic_name: Name of the topic to wait for.
         timeout: Maximum seconds to wait.
+        topic_dir: Explicit topic directory (from --topic-dir).
 
     Returns:
         Port number of the publisher.
@@ -77,7 +85,7 @@ def _wait_for_topic(topic_name: str, timeout: float) -> int:
     max_attempts = int(timeout / _POLL_INTERVAL)
     for attempt in range(max_attempts):
         try:
-            topic_info = read_topic(topic_name)
+            topic_info = read_topic(topic_name, explicit_dir=topic_dir)
             # Verify publisher is alive
             if not is_process_alive(topic_info.pid):
                 raise RuntimeError(
@@ -121,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         # Discover publisher via topic file
-        port = _wait_for_topic(args.topic, args.timeout)
+        port = _wait_for_topic(args.topic, args.timeout, topic_dir=args.topic_dir)
 
         # Connect to publisher
         subscriber.connect(port, timeout=args.timeout)

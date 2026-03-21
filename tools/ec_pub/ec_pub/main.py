@@ -64,6 +64,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Number of subscribers to wait for before publishing",
     )
     parser.add_argument(
+        "--topic-dir",
+        type=str,
+        default=None,
+        help="Directory for topic files (overrides ECHOCRAFT_TOPIC_DIR and default)",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=30.0,
@@ -113,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     # Create publisher and bind
     publisher = Publisher(n_subscribers=args.subscribers)
     topic_name = args.topic
+    topic_dir = args.topic_dir
 
     try:
         port = publisher.bind()
@@ -120,12 +127,12 @@ def main(argv: list[str] | None = None) -> int:
 
         # Write topic file for subscriber discovery
         topic_info = TopicInfo(port=port, pid=os.getpid())
-        topic_path = write_topic(topic_name, topic_info)
-        logger.debug("Topic file written: %s", topic_path)
+        topic_file = write_topic(topic_name, topic_info, explicit_dir=topic_dir)
+        logger.info("Topic file written: %s", topic_file)
 
         # Register cleanup for topic file
         def _cleanup(signum=None, frame=None):
-            remove_topic(topic_name)
+            remove_topic(topic_name, explicit_dir=topic_dir)
             publisher.close()
             if signum is not None:
                 sys.exit(128 + signum)
@@ -156,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Unexpected error: %s", e)
         return 1
     finally:
-        remove_topic(topic_name)
+        remove_topic(topic_name, explicit_dir=topic_dir)
         publisher.close()
 
 

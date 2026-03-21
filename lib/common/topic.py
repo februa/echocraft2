@@ -1,8 +1,13 @@
 """Topic file management for ec-pub/ec-sub communication.
 
 Manages topic files that allow ec-sub to discover the port where
-ec-pub is listening. Topic files are stored in a temporary directory
-and cleaned up on normal exit.
+ec-pub is listening. Topic files are stored in a directory that
+both ec-pub and ec-sub must agree on.
+
+The topic directory is resolved in this priority order:
+  1. Explicit directory passed to functions (from --topic-dir CLI flag)
+  2. ECHOCRAFT_TOPIC_DIR environment variable
+  3. Fallback to system temp directory / "echocraft"
 """
 
 import json
@@ -12,8 +17,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# Default topic directory
-_TOPIC_DIR = Path(tempfile.gettempdir()) / "echocraft"
+def _default_topic_dir() -> Path:
+    """Resolve the default topic directory.
+
+    Returns:
+        Path from ECHOCRAFT_TOPIC_DIR env var, or system tempdir fallback.
+    """
+    env_dir = os.environ.get("ECHOCRAFT_TOPIC_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path(tempfile.gettempdir()) / "echocraft"
 
 
 @dataclass(frozen=True)
@@ -49,20 +62,27 @@ class TopicInfo:
         return cls(port=int(data["port"]), pid=int(data["pid"]))
 
 
-def topic_dir() -> Path:
+def topic_dir(explicit_dir: str | None = None) -> Path:
     """Return the topic directory path.
+
+    Args:
+        explicit_dir: Explicitly specified directory (from --topic-dir).
+            Takes highest priority if provided.
 
     Returns:
         Path to the directory where topic files are stored.
     """
-    return _TOPIC_DIR
+    if explicit_dir:
+        return Path(explicit_dir)
+    return _default_topic_dir()
 
 
-def topic_path(name: str) -> Path:
+def topic_path(name: str, explicit_dir: str | None = None) -> Path:
     """Return the file path for a named topic.
 
     Args:
         name: Topic name (alphanumeric and hyphens).
+        explicit_dir: Explicitly specified directory (from --topic-dir).
 
     Returns:
         Path to the topic file.
@@ -71,10 +91,12 @@ def topic_path(name: str) -> Path:
         ValueError: If topic name contains invalid characters.
     """
     _validate_topic_name(name)
-    return topic_dir() / f"{name}.topic"
+    return topic_dir(explicit_dir) / f"{name}.topic"
 
 
-def write_topic(name: str, info: TopicInfo) -> Path:
+def write_topic(
+    name: str, info: TopicInfo, explicit_dir: str | None = None
+) -> Path:
     """Write a topic file atomically.
 
     Creates the topic directory if it does not exist.
@@ -84,6 +106,7 @@ def write_topic(name: str, info: TopicInfo) -> Path:
     Args:
         name: Topic name.
         info: Topic information to write.
+        explicit_dir: Explicitly specified directory (from --topic-dir).
 
     Returns:
         Path to the written topic file.
@@ -91,7 +114,7 @@ def write_topic(name: str, info: TopicInfo) -> Path:
     Raises:
         ValueError: If topic name is invalid.
     """
-    path = topic_path(name)
+    path = topic_path(name, explicit_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Atomic write: write to temp file in same directory, then rename
@@ -110,11 +133,12 @@ def write_topic(name: str, info: TopicInfo) -> Path:
     return path
 
 
-def read_topic(name: str) -> TopicInfo:
+def read_topic(name: str, explicit_dir: str | None = None) -> TopicInfo:
     """Read a topic file.
 
     Args:
         name: Topic name.
+        explicit_dir: Explicitly specified directory (from --topic-dir).
 
     Returns:
         TopicInfo from the topic file.
@@ -123,19 +147,20 @@ def read_topic(name: str) -> TopicInfo:
         FileNotFoundError: If topic file does not exist.
         ValueError: If topic name is invalid or file content is invalid.
     """
-    path = topic_path(name)
+    path = topic_path(name, explicit_dir)
     with open(path, "r") as f:
         data = json.load(f)
     return TopicInfo.from_dict(data)
 
 
-def remove_topic(name: str) -> None:
+def remove_topic(name: str, explicit_dir: str | None = None) -> None:
     """Remove a topic file if it exists.
 
     Args:
         name: Topic name.
+        explicit_dir: Explicitly specified directory (from --topic-dir).
     """
-    path = topic_path(name)
+    path = topic_path(name, explicit_dir)
     path.unlink(missing_ok=True)
 
 

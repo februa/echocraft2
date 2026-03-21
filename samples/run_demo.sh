@@ -88,6 +88,9 @@ MODEL="lossless"
 # Topic name for pub/sub (unique per demo run to avoid collisions)
 TOPIC="demo-$$"
 
+# Topic directory: use output dir to avoid tempdir path mismatches on Windows
+TOPIC_DIR="${OUTPUT_DIR}/.topics"
+
 mkdir -p "${OUTPUT_DIR}"
 echo "=== ECHOCRAFT Demo ==="
 echo "Output directory: ${OUTPUT_DIR}"
@@ -117,25 +120,25 @@ python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_array --array "${ARRAY}" \
   | python3 -m ec_sample --stream "${STREAM}" --duration ${DURATION} \
   | python3 -m ec_pub --stream "${STREAM}" --array "${ARRAY}" \
-      --topic "${TOPIC}" --subscribers 3 &
+      --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" --subscribers 3 &
 PID_PUB=$!
 
 # Subscriber 1: spectrum analysis
-python3 -m ec_sub --topic "${TOPIC}" \
+python3 -m ec_sub --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" \
   | python3 -m ec_beamform --array "${ARRAY}" --stream "${STREAM}" \
   | python3 -m eca_spectrum --stream "${STREAM}" \
   > "${OUTPUT_DIR}/spectrum.ndjson" &
 PID_SPEC=$!
 
 # Subscriber 2: bearing level analysis
-python3 -m ec_sub --topic "${TOPIC}" \
+python3 -m ec_sub --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" \
   | python3 -m eca_bearing_level --array "${ARRAY}" --stream "${STREAM}" \
       --az-start ${AZ_START} --az-end ${AZ_END} --az-step ${AZ_STEP} \
   > "${OUTPUT_DIR}/bearing.ndjson" &
 PID_BEAR=$!
 
 # Subscriber 3: WAV export
-python3 -m ec_sub --topic "${TOPIC}" \
+python3 -m ec_sub --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" \
   | python3 -m ec_to_wav --stream "${STREAM}" --array "${ARRAY}" \
       --output "${OUTPUT_DIR}/signal.wav" &
 PID_WAV=$!
