@@ -1,6 +1,10 @@
 #!/bin/bash
 # ECHOCRAFT demo: signal generation -> processing -> analysis -> visualization
 #
+# Uses ec-pub/ec-sub to fan out the binary stream from ec-sample to
+# three downstream consumers (spectrum, bearing, WAV) without running
+# the upstream pipeline three times.
+#
 # Prerequisites:
 #   pip install numpy matplotlib
 #
@@ -81,6 +85,9 @@ HEADING="0"
 
 MODEL="lossless"
 
+# Topic name for pub/sub (unique per demo run to avoid collisions)
+TOPIC="demo-$$"
+
 mkdir -p "${OUTPUT_DIR}"
 echo "=== ECHOCRAFT Demo ==="
 echo "Output directory: ${OUTPUT_DIR}"
@@ -93,38 +100,51 @@ python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   > "${OUTPUT_DIR}/sources.ndjson"
 echo "  -> sources.ndjson ($(wc -l < "${OUTPUT_DIR}/sources.ndjson") records)"
 
-# --- 1. Spectrum analysis pipeline ---
-echo "[1/6] Running spectrum analysis pipeline..."
+# --- 1-3. Signal generation -> fan-out -> parallel analysis ---
+#
+# The upstream pipeline (ec-source-nb -> ec-sample) runs ONCE.
+# ec-pub distributes the binary stream to 3 subscribers:
+#   - spectrum analysis (ec-beamform -> eca-spectrum)
+#   - bearing level analysis (eca-bearing-level)
+#   - WAV export (ec-to-wav)
+#
+echo "[1/6] Running signal pipeline with fan-out (ec-pub/ec-sub)..."
+
+# Publisher: upstream pipeline -> ec-pub
 python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_noise --nl ${NL} \
   | python3 -m ec_propagate --env "${OCEAN}" --model ${MODEL} \
   | python3 -m ec_array --array "${ARRAY}" \
   | python3 -m ec_sample --stream "${STREAM}" --duration ${DURATION} \
+  | python3 -m ec_pub --stream "${STREAM}" --array "${ARRAY}" \
+      --topic "${TOPIC}" --subscribers 3 &
+PID_PUB=$!
+
+# Subscriber 1: spectrum analysis
+python3 -m ec_sub --topic "${TOPIC}" \
   | python3 -m ec_beamform --array "${ARRAY}" --stream "${STREAM}" \
   | python3 -m eca_spectrum --stream "${STREAM}" \
-  > "${OUTPUT_DIR}/spectrum.ndjson"
-echo "  -> spectrum.ndjson ($(wc -l < "${OUTPUT_DIR}/spectrum.ndjson") records)"
+  > "${OUTPUT_DIR}/spectrum.ndjson" &
+PID_SPEC=$!
 
-# --- 2. Bearing level analysis pipeline ---
-echo "[2/6] Running bearing level analysis pipeline..."
-python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
-  | python3 -m ec_noise --nl ${NL} \
-  | python3 -m ec_propagate --env "${OCEAN}" --model ${MODEL} \
-  | python3 -m ec_array --array "${ARRAY}" \
-  | python3 -m ec_sample --stream "${STREAM}" --duration ${DURATION} \
+# Subscriber 2: bearing level analysis
+python3 -m ec_sub --topic "${TOPIC}" \
   | python3 -m eca_bearing_level --array "${ARRAY}" --stream "${STREAM}" \
       --az-start ${AZ_START} --az-end ${AZ_END} --az-step ${AZ_STEP} \
-  > "${OUTPUT_DIR}/bearing.ndjson"
-echo "  -> bearing.ndjson ($(wc -l < "${OUTPUT_DIR}/bearing.ndjson") records)"
+  > "${OUTPUT_DIR}/bearing.ndjson" &
+PID_BEAR=$!
 
-# --- 3. WAV export ---
-echo "[3/6] Exporting WAV file..."
-python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
-  | python3 -m ec_noise --nl ${NL} \
-  | python3 -m ec_propagate --env "${OCEAN}" --model ${MODEL} \
-  | python3 -m ec_array --array "${ARRAY}" \
-  | python3 -m ec_sample --stream "${STREAM}" --duration ${DURATION} \
-  | python3 -m ec_to_wav --stream "${STREAM}" --array "${ARRAY}" --output "${OUTPUT_DIR}/signal.wav"
+# Subscriber 3: WAV export
+python3 -m ec_sub --topic "${TOPIC}" \
+  | python3 -m ec_to_wav --stream "${STREAM}" --array "${ARRAY}" \
+      --output "${OUTPUT_DIR}/signal.wav" &
+PID_WAV=$!
+
+# Wait for all pipeline processes
+wait ${PID_PUB} ${PID_SPEC} ${PID_BEAR} ${PID_WAV}
+
+echo "  -> spectrum.ndjson ($(wc -l < "${OUTPUT_DIR}/spectrum.ndjson") records)"
+echo "  -> bearing.ndjson ($(wc -l < "${OUTPUT_DIR}/bearing.ndjson") records)"
 echo "  -> signal.wav ($(stat -c%s "${OUTPUT_DIR}/signal.wav" 2>/dev/null || stat -f%z "${OUTPUT_DIR}/signal.wav") bytes)"
 
 # --- 4. Visualization ---
