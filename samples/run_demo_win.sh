@@ -1,17 +1,15 @@
 #!/bin/bash
 # ECHOCRAFT demo: signal generation -> processing -> analysis -> visualization
 #
-# Linux version — uses ec-pub/ec-sub to fan out the binary stream from
-# ec-sample to three downstream consumers (spectrum, bearing, WAV) without
-# running the upstream pipeline three times.
-#
-# For Windows/Git Bash, use run_demo_win.sh instead (runs upstream 3x).
+# Windows/Git Bash version — runs the upstream pipeline three times
+# (once per consumer). This avoids concurrent process startup issues
+# on Windows. For Linux, use run_demo.sh (ec-pub/ec-sub fan-out).
 #
 # Prerequisites:
 #   pip install numpy matplotlib
 #
-# Usage:
-#   cd samples && bash run_demo.sh
+# Usage (Git Bash):
+#   cd samples && bash run_demo_win.sh
 #
 # Output:
 #   samples/output/
@@ -28,18 +26,6 @@
 #     scene.png          - Scene overview (array + signal directions)
 
 set -euo pipefail
-
-# --- Cleanup trap for background processes ---
-# Tracks all background PIDs so they are killed on script exit (normal or error).
-# This prevents orphaned processes from printing errors after the shell returns.
-BG_PIDS=()
-cleanup() {
-    for pid in "${BG_PIDS[@]}"; do
-        kill "${pid}" 2>/dev/null || true
-        wait "${pid}" 2>/dev/null || true
-    done
-}
-trap cleanup EXIT
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -99,14 +85,8 @@ HEADING="0"
 
 MODEL="lossless"
 
-# Topic name for pub/sub (unique per demo run to avoid collisions)
-TOPIC="demo-$$"
-
-# Topic directory: use output dir to avoid tempdir path mismatches on Windows
-TOPIC_DIR="${OUTPUT_DIR}/.topics"
-
 mkdir -p "${OUTPUT_DIR}"
-echo "=== ECHOCRAFT Demo ==="
+echo "=== ECHOCRAFT Demo (Windows) ==="
 echo "Output directory: ${OUTPUT_DIR}"
 echo ""
 
@@ -117,81 +97,38 @@ python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   > "${OUTPUT_DIR}/sources.ndjson"
 echo "  -> sources.ndjson ($(wc -l < "${OUTPUT_DIR}/sources.ndjson") records)"
 
-# --- 1-3. Signal generation -> fan-out -> parallel analysis ---
-#
-# The upstream pipeline (ec-source-nb -> ec-sample) runs ONCE.
-# ec-pub distributes the binary stream to 3 subscribers:
-#   - spectrum analysis (ec-beamform -> eca-spectrum)
-#   - bearing level analysis (eca-bearing-level)
-#   - WAV export (ec-to-wav)
-#
-echo "[1/6] Running signal pipeline with fan-out (ec-pub/ec-sub)..."
-
-TOPIC_FILE="${TOPIC_DIR}/${TOPIC}.topic"
-
-# Publisher: upstream pipeline -> ec-pub
+# --- 1. Spectrum analysis pipeline ---
+echo "[1/6] Running spectrum analysis pipeline..."
 python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
   | python3 -m ec_noise --nl ${NL} \
   | python3 -m ec_propagate --env "${OCEAN}" --model ${MODEL} \
   | python3 -m ec_array --array "${ARRAY}" \
   | python3 -m ec_sample --stream "${STREAM}" --duration ${DURATION} \
-  | python3 -m ec_pub --stream "${STREAM}" --array "${ARRAY}" \
-      --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" --subscribers 3 &
-PID_PUB=$!
-BG_PIDS+=("${PID_PUB}")
-
-# Wait for publisher to be ready (topic file appears)
-echo "  Waiting for publisher..."
-WAIT_COUNT=0
-while [ ! -f "${TOPIC_FILE}" ]; do
-    sleep 0.2
-    WAIT_COUNT=$((WAIT_COUNT + 1))
-    if [ ${WAIT_COUNT} -ge 150 ]; then
-        echo "  ERROR: Publisher did not start within 30 seconds" >&2
-        exit 1
-    fi
-done
-echo "  Publisher ready."
-
-# --- Staggered subscriber startup ---
-# On Windows, launching many Python processes simultaneously causes
-# import lock contention (NTFS + Defender). Start each subscriber
-# pipeline one at a time with a pause between them.
-
-# Subscriber 1: spectrum analysis
-echo "  Starting subscriber 1/3 (spectrum)..."
-python3 -m ec_sub --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" \
   | python3 -m ec_beamform --array "${ARRAY}" --stream "${STREAM}" \
   | python3 -m eca_spectrum --stream "${STREAM}" \
-  > "${OUTPUT_DIR}/spectrum.ndjson" &
-PID_SPEC=$!
-BG_PIDS+=("${PID_SPEC}")
-sleep 1
+  > "${OUTPUT_DIR}/spectrum.ndjson"
+echo "  -> spectrum.ndjson ($(wc -l < "${OUTPUT_DIR}/spectrum.ndjson") records)"
 
-# Subscriber 2: bearing level analysis
-echo "  Starting subscriber 2/3 (bearing)..."
-python3 -m ec_sub --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" \
+# --- 2. Bearing level analysis pipeline ---
+echo "[2/6] Running bearing level analysis pipeline..."
+python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
+  | python3 -m ec_noise --nl ${NL} \
+  | python3 -m ec_propagate --env "${OCEAN}" --model ${MODEL} \
+  | python3 -m ec_array --array "${ARRAY}" \
+  | python3 -m ec_sample --stream "${STREAM}" --duration ${DURATION} \
   | python3 -m eca_bearing_level --array "${ARRAY}" --stream "${STREAM}" \
       --az-start ${AZ_START} --az-end ${AZ_END} --az-step ${AZ_STEP} \
-  > "${OUTPUT_DIR}/bearing.ndjson" &
-PID_BEAR=$!
-BG_PIDS+=("${PID_BEAR}")
-sleep 1
-
-# Subscriber 3: WAV export
-echo "  Starting subscriber 3/3 (wav)..."
-python3 -m ec_sub --topic "${TOPIC}" --topic-dir "${TOPIC_DIR}" \
-  | python3 -m ec_to_wav --stream "${STREAM}" --array "${ARRAY}" \
-      --output "${OUTPUT_DIR}/signal.wav" &
-PID_WAV=$!
-BG_PIDS+=("${PID_WAV}")
-
-# Wait for all pipeline processes
-echo "  All subscribers started. Waiting for completion..."
-wait ${PID_PUB} ${PID_SPEC} ${PID_BEAR} ${PID_WAV}
-
-echo "  -> spectrum.ndjson ($(wc -l < "${OUTPUT_DIR}/spectrum.ndjson") records)"
+  > "${OUTPUT_DIR}/bearing.ndjson"
 echo "  -> bearing.ndjson ($(wc -l < "${OUTPUT_DIR}/bearing.ndjson") records)"
+
+# --- 3. WAV export ---
+echo "[3/6] Exporting WAV file..."
+python3 -m ec_source_nb --freq ${FREQ} --sl ${SL} --az ${AZ} --el ${EL} \
+  | python3 -m ec_noise --nl ${NL} \
+  | python3 -m ec_propagate --env "${OCEAN}" --model ${MODEL} \
+  | python3 -m ec_array --array "${ARRAY}" \
+  | python3 -m ec_sample --stream "${STREAM}" --duration ${DURATION} \
+  | python3 -m ec_to_wav --stream "${STREAM}" --array "${ARRAY}" --output "${OUTPUT_DIR}/signal.wav"
 echo "  -> signal.wav ($(stat -c%s "${OUTPUT_DIR}/signal.wav" 2>/dev/null || stat -f%z "${OUTPUT_DIR}/signal.wav") bytes)"
 
 # --- 4. Visualization ---

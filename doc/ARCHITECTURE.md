@@ -384,6 +384,10 @@ ec-sub --topic demo | ec-to-wav ... --output signal.wav &
 wait
 ```
 
+> **プラットフォーム注記**: ec-pub/ec-sub は Linux 専用。Windows/Git Bash では
+> 多数の Python プロセスの同時起動時にインポートロック競合が発生するため、
+> `samples/run_demo_win.sh`（上流パイプラインを3回実行する方式）を使用すること。
+
 ### Layer2: `eca-` （分析・パイプ）
 
 **スペクトル系**
